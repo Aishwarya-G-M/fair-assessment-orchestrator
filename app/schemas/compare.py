@@ -7,6 +7,10 @@ class CompareRequest(BaseModel):
     metadata: DatasetMetadata
     tool_a: str = Field(..., description="Primary FAIR assessment tool")
     tool_b: str = Field(..., description="Secondary FAIR assessment tool")
+    include_llm_summary: bool = Field(
+        default=False,
+        description="Whether to include an LLM-generated comparison summary",
+    )
 
 
 class PrincipleScores(BaseModel):
@@ -37,3 +41,5 @@ class CompareResponse(BaseModel):
     score_difference: float
     principle_score_difference: PrincipleScoreDifference
     comparison_summary: str
+    llm_summary: str | None = None
+    llm_summary_generated: bool = False

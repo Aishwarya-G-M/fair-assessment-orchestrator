@@ -6,11 +6,17 @@ from app.schemas.compare import (
     PrincipleScores,
     ToolResult,
 )
+from app.summaries.base import BaseComparisonSummaryProvider
 
 
 class CompareService:
-    def __init__(self, adapters: dict[str, BaseFAIRToolAdapter]) -> None:
+    def __init__(
+        self,
+        adapters: dict[str, BaseFAIRToolAdapter],
+        summary_provider: BaseComparisonSummaryProvider | None = None,
+    ) -> None:
         self.adapters = adapters
+        self.summary_provider = summary_provider
 
     def compare(self, request: CompareRequest) -> CompareResponse:
         adapter_a = self.adapters[request.tool_a]
@@ -44,12 +50,7 @@ class CompareService:
             ),
         )
 
-        summary = (
-            f"{result_a.tool_name} scored higher overall than {result_b.tool_name}. "
-            f"The largest principle-level difference appears in findability and accessibility."
-        )
-
-        return CompareResponse(
+        comparison = CompareResponse(
             tool_a_result=ToolResult(
                 tool_name=result_a.tool_name,
                 overall_score=result_a.overall_score,
@@ -76,5 +77,14 @@ class CompareService:
             ),
             score_difference=score_difference,
             principle_score_difference=principle_difference,
-            comparison_summary=summary,
+            comparison_summary=(
+                f"{result_a.tool_name} scored higher overall than "
+                f"{result_b.tool_name}."
+            ),
         )
+
+        if request.include_llm_summary and self.summary_provider is not None:
+            comparison.llm_summary = self.summary_provider.summarize(comparison)
+            comparison.llm_summary_generated = True
+
+        return comparison
