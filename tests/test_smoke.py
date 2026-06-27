@@ -29,6 +29,7 @@ def test_compare() -> None:
     assert response.status_code == 200
     body = response.json()
 
-    assert "tool_a_result" in body
-    assert "tool_b_result" in body
-    assert "comparison_summary" in body
+    assert "score_difference" in body
+    assert "principle_score_difference" in body
+    assert "principle_scores" in body["tool_a_result"]
+    assert "principle_scores" in body["tool_b_result"]
