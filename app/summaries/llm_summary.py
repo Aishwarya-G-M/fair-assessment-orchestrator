@@ -13,7 +13,7 @@ class LLMComparisonSummaryProvider(BaseComparisonSummaryProvider):
 
     def _build_prompt(self, comparison: CompareResponse) -> str:
         return (
-            "Summarize the FAIR assessment comparison in plain language.\n\n"
+            "Summarize this FAIR assessment comparison in plain language.\n\n"
             f"Tool A: {comparison.tool_a_result.tool_name}\n"
             f"Tool A overall score: {comparison.tool_a_result.overall_score}\n"
             f"Tool A findable: {comparison.tool_a_result.principle_scores.findable}\n"
@@ -31,5 +31,5 @@ class LLMComparisonSummaryProvider(BaseComparisonSummaryProvider):
             f"Accessible difference: {comparison.principle_score_difference.accessible}\n"
             f"Interoperable difference: {comparison.principle_score_difference.interoperable}\n"
             f"Reusable difference: {comparison.principle_score_difference.reusable}\n\n"
-            "Be concise and avoid inventing facts."
+            "Be concise. Use only the provided facts."
         )

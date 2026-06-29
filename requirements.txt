@@ -3,3 +3,5 @@ uvicorn[standard]
 pytest
 httpx
 pydantic
+groq
+python-dotenv
