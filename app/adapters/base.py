@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+from app.schemas.compare import ToolResult
 from app.schemas.metadata import DatasetMetadata
 
 
@@ -35,5 +36,5 @@ class FAIRToolResult:
 
 class BaseFAIRToolAdapter(ABC):
     @abstractmethod
-    def assess(self, metadata: DatasetMetadata) -> FAIRToolResult:
+    def assess(self, metadata: DatasetMetadata) -> ToolResult:
         pass

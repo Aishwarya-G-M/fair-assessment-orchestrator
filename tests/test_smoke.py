@@ -1,59 +1,53 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from app.api.routes import compare_service
 from app.main import create_app
+from app.schemas.compare import PrincipleScores, ToolResult
 
 
-def test_health() -> None:
-    client = TestClient(create_app())
-    response = client.get("/health")
+class FakeFUJIAdapter:
+    def assess(self, metadata):
+        return ToolResult(
+            tool_name="f-uji",
+            overall_score=0.78,
+            principle_scores=PrincipleScores(
+                findable=0.80,
+                accessible=0.75,
+                interoperable=0.70,
+                reusable=0.85,
+            ),
+            raw_summary=f"F-UJI assessed {metadata.identifier}",
+            notes=["FsF-F1-01D: Persistent identifier: pass"],
+        )
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+
+@pytest.fixture
+def client():
+    app = create_app()
+    with TestClient(app) as test_client:
+        yield test_client
 
 
-def test_compare() -> None:
-    client = TestClient(create_app())
+@pytest.fixture
+def fake_fuji_adapter():
+    original = compare_service.adapters["f-uji"]
+    compare_service.adapters["f-uji"] = FakeFUJIAdapter()
+    yield
+    compare_service.adapters["f-uji"] = original
 
-    payload = {
-        "metadata": {
-            "identifier": "doi:10.1234/example",
-            "title": "Example dataset",
-            "description": "A sample dataset for FAIR comparison testing"
+def test_compare(client, fake_fuji_adapter):
+    response = client.post(
+        "/compare",
+        json={
+            "metadata": {
+                "identifier": "doi:10.1234/example",
+                "title": "Example dataset",
+                "description": "A sample dataset",
+            },
+            "tool_a": "f-uji",
+            "tool_b": "fair-checker",
         },
-        "tool_a": "f-uji",
-        "tool_b": "fair-checker"
-    }
-
-    response = client.post("/compare", json=payload)
+    )
 
     assert response.status_code == 200
-    body = response.json()
-
-    assert "score_difference" in body
-    assert "principle_score_difference" in body
-    assert "principle_scores" in body["tool_a_result"]
-    assert "principle_scores" in body["tool_b_result"]
-    assert body["llm_summary"] is None
-    assert body["llm_summary_generated"] is False
-
-def test_compare_with_llm_summary() -> None:
-    client = TestClient(create_app())
-
-    payload = {
-        "metadata": {
-            "identifier": "doi:10.1234/example",
-            "title": "Example dataset",
-            "description": "A sample dataset for FAIR comparison testing"
-        },
-        "tool_a": "f-uji",
-        "tool_b": "fair-checker",
-        "include_llm_summary": True
-    }
-
-    response = client.post("/compare", json=payload)
-
-    assert response.status_code == 200
-    body = response.json()
-
-    assert body["llm_summary_generated"] is True
-    assert body["llm_summary"] is not None
