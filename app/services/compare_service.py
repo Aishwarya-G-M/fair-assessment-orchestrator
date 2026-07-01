@@ -1,98 +1,107 @@
-from app.adapters.base import BaseFAIRToolAdapter
+from __future__ import annotations
+
+from typing import Any
+
 from app.schemas.compare import (
     CompareRequest,
     CompareResponse,
     PrincipleScoreDifference,
+    ToolResult,
 )
-from app.summaries.base import BaseComparisonSummaryProvider
 
 
 class CompareService:
-    def __init__(
-        self,
-        adapters: dict[str, BaseFAIRToolAdapter],
-        summary_provider: BaseComparisonSummaryProvider | None = None,
-    ) -> None:
+    def __init__(self, adapters: dict[str, Any], summary_provider: Any = None):
         self.adapters = adapters
         self.summary_provider = summary_provider
 
     def compare(self, request: CompareRequest) -> CompareResponse:
-        adapter_a = self.adapters[request.tool_a]
-        adapter_b = self.adapters[request.tool_b]
+        if request.tool_a not in self.adapters:
+            raise ValueError(f"Unsupported tool: {request.tool_a}")
+        if request.tool_b not in self.adapters:
+            raise ValueError(f"Unsupported tool: {request.tool_b}")
 
-        result_a = adapter_a.assess(request.metadata)
-        result_b = adapter_b.assess(request.metadata)
+        tool_a_adapter = self.adapters[request.tool_a]
+        tool_b_adapter = self.adapters[request.tool_b]
 
-        score_difference = self._diff(result_a.overall_score, result_b.overall_score)
+        tool_a_result: ToolResult = tool_a_adapter.assess(request.metadata)
+        tool_b_result: ToolResult = tool_b_adapter.assess(request.metadata)
 
-        principle_difference = PrincipleScoreDifference(
+        score_difference = self._diff(
+            tool_a_result.overall_score,
+            tool_b_result.overall_score,
+        )
+
+        principle_score_difference = PrincipleScoreDifference(
             findable=self._diff(
-                self._principle_value(result_a, "findable"),
-                self._principle_value(result_b, "findable"),
+                self._principle(tool_a_result, "findable"),
+                self._principle(tool_b_result, "findable"),
             ),
             accessible=self._diff(
-                self._principle_value(result_a, "accessible"),
-                self._principle_value(result_b, "accessible"),
+                self._principle(tool_a_result, "accessible"),
+                self._principle(tool_b_result, "accessible"),
             ),
             interoperable=self._diff(
-                self._principle_value(result_a, "interoperable"),
-                self._principle_value(result_b, "interoperable"),
+                self._principle(tool_a_result, "interoperable"),
+                self._principle(tool_b_result, "interoperable"),
             ),
             reusable=self._diff(
-                self._principle_value(result_a, "reusable"),
-                self._principle_value(result_b, "reusable"),
+                self._principle(tool_a_result, "reusable"),
+                self._principle(tool_b_result, "reusable"),
             ),
         )
 
-        comparison = CompareResponse(
-            tool_a_result=result_a,
-            tool_b_result=result_b,
-            score_difference=score_difference,
-            principle_score_difference=principle_difference,
-            comparison_summary=self._build_comparison_summary(result_a, result_b),
+        comparison_summary = self._build_summary(
+            request.tool_a,
+            request.tool_b,
+            tool_a_result.overall_score,
+            tool_b_result.overall_score,
         )
 
-        if request.include_llm_summary and self.summary_provider is not None:
-            comparison.llm_summary = self.summary_provider.summarize(comparison)
-            comparison.llm_summary_generated = True
+        response = CompareResponse(
+            tool_a_result=tool_a_result,
+            tool_b_result=tool_b_result,
+            score_difference=score_difference,
+            principle_score_difference=principle_score_difference,
+            comparison_summary=comparison_summary,
+            llm_summary=None,
+            llm_summary_generated=False,
+        )
 
-        return comparison
+        if request.include_llm_summary and self.summary_provider:
+            llm_summary = self.summary_provider.summarize(response)
+            response.llm_summary = llm_summary
+            response.llm_summary_generated = llm_summary is not None
 
-    def _diff(self, a: float | None, b: float | None) -> float | None:
+        return response
+
+    @staticmethod
+    def _principle(result: ToolResult, field: str) -> float | None:
+        if result.principle_scores is None:
+            return None
+        return getattr(result.principle_scores, field, None)
+
+    @staticmethod
+    def _diff(a: float | None, b: float | None) -> float | None:
         if a is None or b is None:
             return None
         return round(a - b, 2)
 
-    def _principle_value(self, result, principle: str) -> float | None:
-        if result.principle_scores is None:
-            return None
-        return getattr(result.principle_scores, principle, None)
-
-    def _build_comparison_summary(self, result_a, result_b) -> str:
-        if result_a.error and result_b.error:
+    @staticmethod
+    def _build_summary(
+        tool_a: str,
+        tool_b: str,
+        score_a: float | None,
+        score_b: float | None,
+    ) -> str:
+        if score_a is None or score_b is None:
             return (
-                f"Both {result_a.tool_name} and {result_b.tool_name} returned errors."
+                f"Comparison completed for {tool_a} and {tool_b}, "
+                "but one or both overall scores were unavailable."
             )
 
-        if result_a.error:
-            return f"{result_a.tool_name} returned an error; {result_b.tool_name} completed."
-        if result_b.error:
-            return f"{result_b.tool_name} returned an error; {result_a.tool_name} completed."
-
-        if result_a.overall_score is not None and result_b.overall_score is not None:
-            if result_a.overall_score > result_b.overall_score:
-                return (
-                    f"{result_a.tool_name} scored higher overall than "
-                    f"{result_b.tool_name}."
-                )
-            if result_b.overall_score > result_a.overall_score:
-                return (
-                    f"{result_b.tool_name} scored higher overall than "
-                    f"{result_a.tool_name}."
-                )
-            return f"{result_a.tool_name} and {result_b.tool_name} scored equally overall."
-
-        return (
-            f"Completed comparison between {result_a.tool_name} and "
-            f"{result_b.tool_name}, but at least one tool did not provide a normalized overall score."
-        )
+        if score_a > score_b:
+            return f"{tool_a} scored higher overall than {tool_b}."
+        if score_b > score_a:
+            return f"{tool_b} scored higher overall than {tool_a}."
+        return f"{tool_a} and {tool_b} scored equally overall."
