@@ -3,8 +3,6 @@ from app.schemas.compare import (
     CompareRequest,
     CompareResponse,
     PrincipleScoreDifference,
-    PrincipleScores,
-    ToolResult,
 )
 from app.summaries.base import BaseComparisonSummaryProvider
 
@@ -25,62 +23,33 @@ class CompareService:
         result_a = adapter_a.assess(request.metadata)
         result_b = adapter_b.assess(request.metadata)
 
-        score_difference = round(result_a.overall_score - result_b.overall_score, 2)
+        score_difference = self._diff(result_a.overall_score, result_b.overall_score)
 
         principle_difference = PrincipleScoreDifference(
-            findable=round(
-                result_a.principle_scores.findable
-                - result_b.principle_scores.findable,
-                2,
+            findable=self._diff(
+                self._principle_value(result_a, "findable"),
+                self._principle_value(result_b, "findable"),
             ),
-            accessible=round(
-                result_a.principle_scores.accessible
-                - result_b.principle_scores.accessible,
-                2,
+            accessible=self._diff(
+                self._principle_value(result_a, "accessible"),
+                self._principle_value(result_b, "accessible"),
             ),
-            interoperable=round(
-                result_a.principle_scores.interoperable
-                - result_b.principle_scores.interoperable,
-                2,
+            interoperable=self._diff(
+                self._principle_value(result_a, "interoperable"),
+                self._principle_value(result_b, "interoperable"),
             ),
-            reusable=round(
-                result_a.principle_scores.reusable
-                - result_b.principle_scores.reusable,
-                2,
+            reusable=self._diff(
+                self._principle_value(result_a, "reusable"),
+                self._principle_value(result_b, "reusable"),
             ),
         )
 
         comparison = CompareResponse(
-            tool_a_result=ToolResult(
-                tool_name=result_a.tool_name,
-                overall_score=result_a.overall_score,
-                principle_scores=PrincipleScores(
-                    findable=result_a.principle_scores.findable,
-                    accessible=result_a.principle_scores.accessible,
-                    interoperable=result_a.principle_scores.interoperable,
-                    reusable=result_a.principle_scores.reusable,
-                ),
-                raw_summary=result_a.raw_summary,
-                notes=result_a.notes,
-            ),
-            tool_b_result=ToolResult(
-                tool_name=result_b.tool_name,
-                overall_score=result_b.overall_score,
-                principle_scores=PrincipleScores(
-                    findable=result_b.principle_scores.findable,
-                    accessible=result_b.principle_scores.accessible,
-                    interoperable=result_b.principle_scores.interoperable,
-                    reusable=result_b.principle_scores.reusable,
-                ),
-                raw_summary=result_b.raw_summary,
-                notes=result_b.notes,
-            ),
+            tool_a_result=result_a,
+            tool_b_result=result_b,
             score_difference=score_difference,
             principle_score_difference=principle_difference,
-            comparison_summary=(
-                f"{result_a.tool_name} scored higher overall than "
-                f"{result_b.tool_name}."
-            ),
+            comparison_summary=self._build_comparison_summary(result_a, result_b),
         )
 
         if request.include_llm_summary and self.summary_provider is not None:
@@ -88,3 +57,42 @@ class CompareService:
             comparison.llm_summary_generated = True
 
         return comparison
+
+    def _diff(self, a: float | None, b: float | None) -> float | None:
+        if a is None or b is None:
+            return None
+        return round(a - b, 2)
+
+    def _principle_value(self, result, principle: str) -> float | None:
+        if result.principle_scores is None:
+            return None
+        return getattr(result.principle_scores, principle, None)
+
+    def _build_comparison_summary(self, result_a, result_b) -> str:
+        if result_a.error and result_b.error:
+            return (
+                f"Both {result_a.tool_name} and {result_b.tool_name} returned errors."
+            )
+
+        if result_a.error:
+            return f"{result_a.tool_name} returned an error; {result_b.tool_name} completed."
+        if result_b.error:
+            return f"{result_b.tool_name} returned an error; {result_a.tool_name} completed."
+
+        if result_a.overall_score is not None and result_b.overall_score is not None:
+            if result_a.overall_score > result_b.overall_score:
+                return (
+                    f"{result_a.tool_name} scored higher overall than "
+                    f"{result_b.tool_name}."
+                )
+            if result_b.overall_score > result_a.overall_score:
+                return (
+                    f"{result_b.tool_name} scored higher overall than "
+                    f"{result_a.tool_name}."
+                )
+            return f"{result_a.tool_name} and {result_b.tool_name} scored equally overall."
+
+        return (
+            f"Completed comparison between {result_a.tool_name} and "
+            f"{result_b.tool_name}, but at least one tool did not provide a normalized overall score."
+        )

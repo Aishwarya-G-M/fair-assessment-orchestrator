@@ -1,0 +1,24 @@
+services:
+  fuji:
+    image: ghcr.io/pangaea-data-publisher/fuji:latest
+    ports:
+      - "1071:1071"
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request, sys\nurl='http://localhost:1071/fuji/api/v1/ui/'\ntry:\n    urllib.request.urlopen(url, timeout=5)\n    sys.exit(0)\nexcept Exception:\n    sys.exit(1)\nPY"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      fuji:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
