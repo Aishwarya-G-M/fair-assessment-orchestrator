@@ -13,10 +13,10 @@ class FAIRCheckerAdapter(BaseFAIRToolAdapter):
     def __init__(
         self,
         http_client: FAIRToolHTTPClient | None = None,
-        base_url: str = "https://fair-checker.france-bioinformatique.fr/api/check",
+        base_url: str = "https://fair-checker.france-bioinformatique.fr/api/check/metrics_all",
     ) -> None:
         self.http_client = http_client or FAIRToolHTTPClient()
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
 
     def assess(self, metadata: DatasetMetadata) -> ToolResult:
         try:
@@ -29,27 +29,40 @@ class FAIRCheckerAdapter(BaseFAIRToolAdapter):
         except httpx.HTTPError as exc:
             raise RuntimeError(f"FAIR-Checker request failed: {exc}") from exc
 
-        notes = self._extract_notes(payload)
         warnings: list[str] = []
 
-        overall_score = self._extract_overall_score(payload, warnings)
+        if not isinstance(payload, list):
+            warnings.append("FAIR-Checker returned unexpected non-list payload.")
+            return ToolResult(
+                tool_name="fair-checker",
+                raw_payload=payload,
+                llm_context=json.dumps(payload, indent=2, default=str),
+                warnings=warnings,
+                error="Unexpected payload format.",
+            )
+
+        measurements = self._parse_measurements(payload)
+        notes = [f"{k}: {v}" for k, v in measurements.items()]
+
+        overall = self._overall_score(measurements)
         principle_scores = PrincipleScores(
-            findable=self._extract_principle_score(payload, "findable", warnings),
-            accessible=self._extract_principle_score(payload, "accessible", warnings),
-            interoperable=self._extract_principle_score(payload, "interoperable", warnings),
-            reusable=self._extract_principle_score(payload, "reusable", warnings),
+            findable=self._principle_score(measurements, "F"),
+            accessible=self._principle_score(measurements, "A"),
+            interoperable=self._principle_score(measurements, "I"),
+            reusable=self._principle_score(measurements, "R"),
         )
 
-        llm_context = self._build_llm_context(
-            metadata_identifier=metadata.identifier,
-            payload=payload,
-            notes=notes,
-            warnings=warnings,
-        )
+        llm_context = json.dumps({
+            "tool": "fair-checker",
+            "input_identifier": metadata.identifier,
+            "measurements": measurements,
+            "notes": notes,
+            "warnings": warnings,
+        }, indent=2)
 
         return ToolResult(
             tool_name="fair-checker",
-            overall_score=overall_score,
+            overall_score=overall,
             principle_scores=principle_scores,
             raw_summary="Assessment returned by FAIR-Checker.",
             notes=notes,
@@ -59,60 +72,29 @@ class FAIRCheckerAdapter(BaseFAIRToolAdapter):
             error=None,
         )
 
-    def _extract_overall_score(
-        self,
-        payload: dict[str, Any],
-        warnings: list[str],
-    ) -> float | None:
-        score = payload.get("overall_score")
-
-        if isinstance(score, (int, float, str)):
-            try:
-                return round(float(score), 2)
-            except (TypeError, ValueError):
-                warnings.append("Could not parse FAIR-Checker overall_score as numeric.")
-                return None
-
-        warnings.append("FAIR-Checker overall_score was missing or not numeric.")
-        return None
-
-    def _extract_principle_score(
-        self,
-        payload: dict[str, Any],
-        key: str,
-        warnings: list[str],
-    ) -> float | None:
-        principles = payload.get("principles", {})
-        if not isinstance(principles, dict):
-            warnings.append("FAIR-Checker principles field was missing or not a dict.")
-            return None
-
-        score = principles.get(key)
-        if isinstance(score, (int, float, str)):
-            try:
-                return round(float(score), 2)
-            except (TypeError, ValueError):
-                warnings.append(f"Could not parse FAIR-Checker principle score for {key}.")
-                return None
-
-        return None
-
-    def _extract_notes(self, payload: dict[str, Any]) -> list[str]:
-        notes: list[str] = []
-        checks = payload.get("checks", [])
-        if not isinstance(checks, list):
-            return notes
-
-        for item in checks[:5]:
-            if not isinstance(item, dict):
+    def _parse_measurements(self, payload: list) -> dict[str, int]:
+        """Returns a dict of metric_id -> integer score value."""
+        measurements = {}
+        for item in payload:
+            if "http://www.w3.org/ns/dqv#QualityMeasurement" not in item.get("@type", []):
                 continue
+            metric_ref = item.get("http://www.w3.org/ns/dqv#isMeasurementOf", [{}])[0].get("@id", "")
+            metric_id = metric_ref.split("/")[-1]  # e.g. "F1A", "I2", "R1.1"
+            value_list = item.get("http://www.w3.org/ns/dqv#value", [{}])
+            value = value_list[0].get("@value", 0) if value_list else 0
+            measurements[metric_id] = int(value)
+        return measurements
 
-            name = item.get("name")
-            status = item.get("status")
-            if name and status:
-                notes.append(f"{name}: {status}")
+    def _principle_score(self, measurements: dict[str, int], prefix: str) -> float | None:
+        matching = {k: v for k, v in measurements.items() if k.startswith(prefix)}
+        if not matching:
+            return None
+        return round(sum(matching.values()) / (len(matching) * 2), 2)
 
-        return notes
+    def _overall_score(self, measurements: dict[str, int]) -> float | None:
+        if not measurements:
+            return None
+        return round(sum(measurements.values()) / (len(measurements) * 2), 2)
 
     def _build_llm_context(
         self,

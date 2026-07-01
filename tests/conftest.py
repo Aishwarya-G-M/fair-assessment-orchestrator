@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services.compare_service import CompareService
+from dependencies import get_compare_service
 from tests.mocks.adapters import MockFUJIAdapter, MockFairCheckerAdapter
 
 

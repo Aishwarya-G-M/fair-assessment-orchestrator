@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends
 
+from app.adapters.fair_checker import FAIRCheckerAdapter
 from app.adapters.fuji_adapter import FUJIAdapter
-from app.adapters.mock_fair_checker import MockFairCheckerAdapter
 from dependencies import get_compare_service
-from app.schemas.compare import CompareRequest
+from app.schemas.compare import CompareRequest, CompareResponse
 from app.services.compare_service import CompareService
 from app.summaries.base import BaseComparisonSummaryProvider
 from app.summaries.llm_summary import LLMComparisonSummaryProvider
@@ -25,7 +25,7 @@ def get_summary_provider() -> BaseComparisonSummaryProvider | None:
 compare_service = CompareService(
     adapters={
         "f-uji": FUJIAdapter(),
-        "fair-checker": MockFairCheckerAdapter(),
+        "fair-checker": FAIRCheckerAdapter(),
     },
     summary_provider=get_summary_provider(),
 )
@@ -36,9 +36,9 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.post("/compare")
+@router.post("/compare", response_model=CompareResponse)
 def compare(
     request: CompareRequest,
     compare_service: CompareService = Depends(get_compare_service),
-):
+) -> CompareResponse:
     return compare_service.compare(request)
