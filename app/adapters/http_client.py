@@ -1,5 +1,6 @@
 import httpx
 
+timeout=httpx.Timeout(60.0, connect=10.0)
 
 class FAIRToolHTTPClient:
     def __init__(self, timeout: float = 30.0) -> None:

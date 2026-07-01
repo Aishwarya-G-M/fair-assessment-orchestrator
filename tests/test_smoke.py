@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.routes import compare_service
-from app.main import create_app
+from dependencies import get_compare_service
+from app.main import app
 from app.schemas.compare import PrincipleScores, ToolResult
 
 
@@ -21,22 +21,14 @@ class FakeFUJIAdapter:
             notes=["FsF-F1-01D: Persistent identifier: pass"],
         )
 
-
 @pytest.fixture
-def client():
-    app = create_app()
+def client(test_compare_service):
+    app.dependency_overrides[get_compare_service] = lambda: test_compare_service
     with TestClient(app) as test_client:
         yield test_client
+    app.dependency_overrides.clear()
 
-
-@pytest.fixture
-def fake_fuji_adapter():
-    original = compare_service.adapters["f-uji"]
-    compare_service.adapters["f-uji"] = FakeFUJIAdapter()
-    yield
-    compare_service.adapters["f-uji"] = original
-
-def test_compare(client, fake_fuji_adapter):
+def test_compare(client):
     response = client.post(
         "/compare",
         json={

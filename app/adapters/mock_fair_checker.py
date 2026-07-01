@@ -1,25 +1,53 @@
-from app.adapters.base import (
-    BaseFAIRToolAdapter,
-    FAIRPrincipleScores,
-    FAIRToolResult,
-)
+import json
+
+from app.adapters.base import BaseFAIRToolAdapter
+from app.schemas.compare import PrincipleScores, ToolResult
 from app.schemas.metadata import DatasetMetadata
 
 
 class MockFairCheckerAdapter(BaseFAIRToolAdapter):
-    def assess(self, metadata: DatasetMetadata) -> FAIRToolResult:
-        return FAIRToolResult(
-            tool_name="fair-checker",
-            overall_score=0.64,
-            principle_scores=FAIRPrincipleScores(
-                findable=0.70,
-                accessible=0.68,
-                interoperable=0.55,
-                reusable=0.63,
-            ),
-            raw_summary=f"Mock FAIR Checker assessment for {metadata.identifier}",
-            notes=[
-                "Some metadata fields may be incomplete",
-                "Interoperability checks are stricter",
+    def assess(self, metadata: DatasetMetadata) -> ToolResult:
+        raw_payload = {
+            "tool": "fair-checker",
+            "mock": True,
+            "input_identifier": metadata.identifier,
+            "overall_score": 0.72,
+            "principles": {
+                "findable": 0.80,
+                "accessible": 0.70,
+                "interoperable": 0.65,
+                "reusable": 0.73,
+            },
+            "checks": [
+                {"name": "Persistent identifier", "status": "pass"},
+                {"name": "Metadata availability", "status": "pass"},
+                {"name": "Accessible protocol", "status": "pass"},
+                {"name": "Interoperable vocabularies", "status": "warning"},
+                {"name": "License information", "status": "pass"},
             ],
+        }
+
+        notes = [
+            "Persistent identifier: pass",
+            "Metadata availability: pass",
+            "Accessible protocol: pass",
+            "Interoperable vocabularies: warning",
+            "License information: pass",
+        ]
+
+        return ToolResult(
+            tool_name="fair-checker",
+            overall_score=0.72,
+            principle_scores=PrincipleScores(
+                findable=0.80,
+                accessible=0.70,
+                interoperable=0.65,
+                reusable=0.73,
+            ),
+            raw_summary="Mock assessment from FAIR-Checker.",
+            notes=notes,
+            raw_payload=raw_payload,
+            llm_context=json.dumps(raw_payload, indent=2),
+            warnings=[],
+            error=None,
         )
